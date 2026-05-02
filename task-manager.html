@@ -2,424 +2,279 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-  <title>TaskFlow Pro | Firebase Backend</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TaskFlow Pro – Working</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
-  <!-- Firebase SDK (compat version) -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-  <style>
-    * { font-family: 'Inter', system-ui, sans-serif; }
-    body { background: radial-gradient(circle at 10% 30%, #f0f4ff, #e6edfa); background-attachment: fixed; }
-    .glass-panel { background: rgba(255,255,255,0.92); backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,0.5); }
-    .fade-in { animation: fadeUp 0.35s ease-out; }
-    @keyframes fadeUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
-    .stats-card { background: white; border-radius: 1rem; padding: 0.75rem; text-align: center; cursor: pointer; transition: all 0.2s; border: 1px solid #eef2ff; }
-    .stats-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,0.1); }
-    .stats-card.active { background: #eef2ff; border-color: #6366f1; }
-    ::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-track { background: #eef2ff; } ::-webkit-scrollbar-thumb { background: #6366f1; border-radius: 10px; }
-    .error-box { background: #fee; border: 1px solid red; padding: 1rem; margin: 1rem; border-radius: 1rem; color: #c00; }
-  </style>
 </head>
-<body class="min-h-screen p-5 md:p-8">
-<div id="appRoot" class="max-w-7xl mx-auto">
-  <div class="text-center mt-20 text-gray-500">Loading TaskFlow...</div>
-</div>
+<body class="bg-gradient-to-br from-indigo-50 to-slate-100 min-h-screen p-5">
+<div id="app" class="max-w-6xl mx-auto"></div>
 
 <script>
-  (async function() {
+  // 🔁 YOUR FIREBASE CONFIG (already pasted)
+  const firebaseConfig = {
+    apiKey: "AIzaSyChQUqU54ApeLbKmQuAsgga5Q6MQsJWa-Q",
+    authDomain: "taskflowfinal-c46fb.firebaseapp.com",
+    projectId: "taskflowfinal-c46fb",
+    storageBucket: "taskflowfinal-c46fb.firebasestorage.app",
+    messagingSenderId: "257390066549",
+    appId: "1:257390066549:web:dfe5f8c05d459a7cd8713c"
+  };
+  // ----------------------------------------------------
+
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+  const auth = firebase.auth();
+
+  // Test Firestore connection
+  testFirestore();
+
+  async function testFirestore() {
     try {
-      // ======================= FIREBASE CONFIG (YOUR CONFIG) =======================
-    // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-  apiKey: "AIzaSyDzdI5YdtIoIk4Uv4U-UzfPHMEVM3hiETo",
-  authDomain: "taskflow-10e66.firebaseapp.com",
-  projectId: "taskflow-10e66",
-  storageBucket: "taskflow-10e66.firebasestorage.app",
-  messagingSenderId: "834702399294",
-  appId: "1:834702399294:web:59b1704ce56955271c7e6f",
-  measurementId: "G-YX067GXPK9"
-};
-      firebase.initializeApp(firebaseConfig);
-      const db = firebase.firestore();
-      const auth = firebase.auth();
+      await db.collection('_test').doc('ping').set({ ok: true });
+      console.log('Firestore OK');
+      startApp();
+    } catch (err) {
+      document.getElementById('app').innerHTML = `
+        <div class="bg-red-100 p-4 rounded">
+          <p><strong>❌ Firebase Error:</strong> ${err.message}</p>
+          <p>👉 Make sure:</p>
+          <ul class="list-disc pl-5">
+            <li>Firestore Rules are <code>allow read, write: if true;</code> (test mode)</li>
+            <li>Authentication: Email/Password is ENABLED</li>
+            <li>Config is copied from the correct project</li>
+          </ul>
+        </div>`;
+    }
+  }
 
-      // ======================= GLOBAL STATE =======================
-      let currentUser = null;
-      let currentCompanyId = null;
-      let employees = [];
-      let tasks = [];
-      let companies = [];
+  // ----- FULL APP (only after test passes) -----
+  let currentUser = null, currentCompanyId = null, employees = [], tasks = [], companies = [];
 
-      // ======================= LOAD DATA =======================
-      async function loadCompanies() {
-        const snapshot = await db.collection("companies").get();
-        companies = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  async function loadCompanies() {
+    const snap = await db.collection("companies").get();
+    companies = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  }
+  async function loadCompanyData(cid) {
+    const empSnap = await db.collection("users").where("companyId", "==", cid).get();
+    employees = empSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const taskSnap = await db.collection("tasks").where("companyId", "==", cid).get();
+    tasks = taskSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  }
+
+  async function setSession(user) {
+    currentUser = user;
+    if (user && user.uid !== "super") {
+      const doc = await db.collection("users").doc(user.uid).get();
+      if (doc.exists) {
+        currentCompanyId = doc.data().companyId;
+        await loadCompanyData(currentCompanyId);
       }
+    } else if (user && user.uid === "super") {
+      currentCompanyId = null; employees = []; tasks = [];
+      await loadCompanies();
+    } else {
+      currentCompanyId = null; employees = []; tasks = [];
+    }
+    renderApp();
+  }
 
-      async function loadCompanyData(companyId) {
-        const empSnap = await db.collection("users").where("companyId", "==", companyId).get();
-        employees = empSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        const tasksSnap = await db.collection("tasks").where("companyId", "==", companyId).get();
-        tasks = tasksSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      }
+  auth.onAuthStateChanged(async (u) => {
+    if (u) {
+      const doc = await db.collection("users").doc(u.uid).get();
+      const role = doc.exists ? doc.data().role : "employee";
+      const name = doc.exists ? doc.data().name : u.email;
+      await setSession({ uid: u.uid, email: u.email, role, name });
+    } else { await setSession(null); }
+  });
 
-      // ======================= AUTH & SESSION =======================
-      async function setSession(user) {
-        currentUser = user;
-        if (user && user.uid !== "super") {
-          const userDoc = await db.collection("users").doc(user.uid).get();
-          const userData = userDoc.data();
-          if (userData) {
-            currentCompanyId = userData.companyId;
-            await loadCompanyData(currentCompanyId);
-          }
-        } else if (user && user.uid === "super") {
-          currentCompanyId = null;
-          employees = [];
-          tasks = [];
-          await loadCompanies();
-        } else {
-          currentCompanyId = null;
-          employees = [];
-          tasks = [];
-        }
-        renderApp();
-      }
-
-      auth.onAuthStateChanged(async (firebaseUser) => {
-        if (firebaseUser) {
-          const userDoc = await db.collection("users").doc(firebaseUser.uid).get();
-          const role = userDoc.exists ? userDoc.data().role : "employee";
-          const name = userDoc.exists ? userDoc.data().name : firebaseUser.email;
-          const customUser = { uid: firebaseUser.uid, email: firebaseUser.email, role, name };
-          await setSession(customUser);
-        } else {
-          await setSession(null);
-        }
-      });
-
-      const SUPER_EMAIL = "super@taskflow.com";
-      const SUPER_PASSWORD = "super123";
-      async function loginSuper(email, password) {
-        if (email === SUPER_EMAIL && password === SUPER_PASSWORD) {
-          const superUser = { uid: "super", email: SUPER_EMAIL, role: "super", name: "System Owner" };
-          await setSession(superUser);
-          renderApp();
-          return true;
-        }
+  const SUPER_EMAIL = "super@taskflow.com", SUPER_PASSWORD = "super123";
+  async function loginSuper(email, pwd) {
+    if (email === SUPER_EMAIL && pwd === SUPER_PASSWORD) {
+      await setSession({ uid: "super", email: SUPER_EMAIL, role: "super", name: "System Owner" });
+      return true;
+    }
+    return false;
+  }
+  async function loginToCompany(cid, email, pwd) {
+    try {
+      const cred = await auth.signInWithEmailAndPassword(email, pwd);
+      const doc = await db.collection("users").doc(cred.user.uid).get();
+      if (!doc.exists || doc.data().companyId !== cid) {
+        await auth.signOut();
+        alert("Not authorized for this company");
         return false;
       }
+      return true;
+    } catch (err) { alert("Login failed: " + err.message); return false; }
+  }
+  async function logout() {
+    if (currentUser && currentUser.uid !== "super") await auth.signOut();
+    else currentUser = null;
+    renderApp();
+  }
 
-      async function loginToCompany(companyId, email, password) {
-        try {
-          const cred = await auth.signInWithEmailAndPassword(email, password);
-          const user = cred.user;
-          const userDoc = await db.collection("users").doc(user.uid).get();
-          if (!userDoc.exists || userDoc.data().companyId !== companyId) {
-            await auth.signOut();
-            alert("You are not authorized for this company.");
-            return false;
-          }
-          return true;
-        } catch (err) {
-          alert("Login failed: " + err.message);
-          return false;
-        }
-      }
-
-      async function logout() {
-        if (currentUser && currentUser.uid !== "super") await auth.signOut();
-        else currentUser = null;
-        renderApp();
-      }
-
-      // ======================= OWNER OPERATIONS =======================
-      async function addCompany(name, logo, address) {
-        if (!name) return alert("Company name required");
-        await db.collection("companies").add({ name, logo, address, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-        await loadCompanies();
-        renderApp();
-      }
-
-      async function deleteCompany(companyId) {
-        if (confirm("Delete this company and ALL its data?")) {
-          const usersSnap = await db.collection("users").where("companyId", "==", companyId).get();
-          const batch = db.batch();
-          usersSnap.docs.forEach(doc => batch.delete(doc.ref));
-          const tasksSnap = await db.collection("tasks").where("companyId", "==", companyId).get();
-          tasksSnap.docs.forEach(doc => batch.delete(doc.ref));
-          await batch.commit();
-          await db.collection("companies").doc(companyId).delete();
-          await loadCompanies();
-          if (currentCompanyId === companyId) currentCompanyId = null;
-          renderApp();
-        }
-      }
-
-      // ======================= COMPANY ADMIN OPERATIONS =======================
-      async function addEmployee(name, email, password, role) {
-        if (!name || !email || !password) return alert("All fields required");
-        try {
-          const cred = await auth.createUserWithEmailAndPassword(email, password);
-          const uid = cred.user.uid;
-          await db.collection("users").doc(uid).set({
-            name, email, role, companyId: currentCompanyId, createdAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          await loadCompanyData(currentCompanyId);
-          renderApp();
-        } catch (err) { alert(err.message); }
-      }
-
-      async function deleteEmployee(empId) {
-        if (currentUser && currentUser.uid === empId) { alert("Cannot delete self"); return; }
-        await db.collection("users").doc(empId).delete();
-        const tasksSnap = await db.collection("tasks").where("employeeId", "==", empId).get();
-        const batch = db.batch();
-        tasksSnap.docs.forEach(doc => batch.delete(doc.ref));
-        await batch.commit();
-        await loadCompanyData(currentCompanyId);
-        renderApp();
-      }
-
-      // ======================= TASKS =======================
-      async function saveOrUpdateTask(employeeId, date, taskText, status) {
-        const existing = tasks.find(t => t.employeeId === employeeId && t.date === date);
-        if (existing) {
-          await db.collection("tasks").doc(existing.id).update({ taskText, status });
-        } else {
-          await db.collection("tasks").add({
-            employeeId, companyId: currentCompanyId, date, taskText, status,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-        }
-        await loadCompanyData(currentCompanyId);
-        renderApp();
-      }
-
-      function getEmployeeTasks(empId) {
-        return tasks.filter(t => t.employeeId === empId).sort((a,b) => b.date.localeCompare(a.date));
-      }
-
-      function getTasksByDate(date) {
-        return tasks.filter(t => t.date === date).map(t => {
-          const emp = employees.find(e => e.id === t.employeeId);
-          return { ...t, employeeName: emp ? emp.name : "Deleted" };
-        });
-      }
-
-      // ======================= EXCEL =======================
-      function exportToExcel() {
-        const empData = employees.map(e => ({ ID: e.id, "Full Name": e.name, Email: e.email, Role: e.role }));
-        const tasksData = tasks.map(t => {
-          const emp = employees.find(e => e.id === t.employeeId);
-          return { Employee: emp ? emp.name : "Deleted", Date: t.date, Task: t.taskText, Status: t.status === "leave" ? "Leave" : "Present" };
-        });
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(empData), "Employees");
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tasksData), "Tasks");
-        XLSX.writeFile(wb, `TaskFlow_${companies.find(c=>c.id===currentCompanyId)?.name || "All"}_${new Date().toISOString().slice(0,10)}.xlsx`);
-      }
-
-      // ======================= RENDER FUNCTIONS =======================
-      function renderLoginScreen() {
-        const companyOptions = companies.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-        return `
-          <div class="max-w-5xl mx-auto mt-12">
-            <div class="text-center mb-8"><i class="fas fa-tasks text-5xl text-indigo-600"></i><h1 class="text-3xl font-bold">TaskFlow</h1><p class="text-gray-500">Firebase Backend · Multi‑Company</p></div>
-            <div class="grid md:grid-cols-2 gap-8">
-              <div class="glass-panel rounded-3xl p-8"><div class="text-center"><i class="fas fa-user-shield text-4xl text-indigo-600"></i><h2 class="text-2xl font-bold mt-2">Admin Login</h2></div>
-                <form id="adminLoginForm" class="space-y-4 mt-4"><select id="adminCompanyId" class="w-full border rounded-xl px-3 py-2" required><option value="">-- Select Company --</option>${companyOptions}</select><input type="email" id="adminEmail" placeholder="Email" class="w-full border rounded-xl px-3 py-2"><input type="password" id="adminPassword" placeholder="Password" class="w-full border rounded-xl px-3 py-2"><button type="submit" class="w-full bg-indigo-600 text-white py-2 rounded-xl">Login as Admin</button></form></div>
-              <div class="glass-panel rounded-3xl p-8"><div class="text-center"><i class="fas fa-user-check text-4xl text-emerald-600"></i><h2 class="text-2xl font-bold mt-2">Employee Login</h2></div>
-                <form id="employeeLoginForm" class="space-y-4 mt-4"><select id="employeeCompanyId" class="w-full border rounded-xl px-3 py-2" required><option value="">-- Select Company --</option>${companyOptions}</select><input type="email" id="employeeEmail" placeholder="Email" class="w-full border rounded-xl px-3 py-2"><input type="password" id="employeePassword" placeholder="Password" class="w-full border rounded-xl px-3 py-2"><button type="submit" class="w-full bg-emerald-600 text-white py-2 rounded-xl">Login as Employee</button></form></div>
-            </div>
-            <div class="text-center mt-6"><button id="ownerLoginLink" class="underline text-xs">Owner Login</button></div>
-          </div>
-        `;
-      }
-
-      function attachLoginEvents() {
-        document.getElementById("adminLoginForm")?.addEventListener("submit", async (e) => {
-          e.preventDefault();
-          const cid = document.getElementById("adminCompanyId").value;
-          const email = document.getElementById("adminEmail").value;
-          const pwd = document.getElementById("adminPassword").value;
-          if (!cid) return alert("Select company");
-          await loginToCompany(cid, email, pwd);
-        });
-        document.getElementById("employeeLoginForm")?.addEventListener("submit", async (e) => {
-          e.preventDefault();
-          const cid = document.getElementById("employeeCompanyId").value;
-          const email = document.getElementById("employeeEmail").value;
-          const pwd = document.getElementById("employeePassword").value;
-          if (!cid) return alert("Select company");
-          await loginToCompany(cid, email, pwd);
-        });
-        document.getElementById("ownerLoginLink")?.addEventListener("click", () => {
-          const email = prompt("Owner email:");
-          const pwd = prompt("Owner password:");
-          if (email === SUPER_EMAIL && pwd === SUPER_PASSWORD) loginSuper(email, pwd);
-          else alert("Invalid owner credentials");
-        });
-      }
-
-      function renderSuperDashboard() {
-        return `
-          <div class="glass-panel rounded-3xl shadow-xl p-6 md:p-8 fade-in"><div class="flex justify-between items-center mb-6"><h2 class="text-2xl font-bold"><i class="fas fa-crown text-amber-500"></i> Owner Dashboard</h2><button id="superLogout" class="border px-4 py-2 rounded-xl">Logout</button></div>
-          <button id="addCompanyBtn" class="bg-indigo-600 text-white px-4 py-2 rounded-xl mb-6">+ Add Company</button>
-          <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">${companies.map(c => `<div class="bg-white/70 rounded-2xl p-4"><div class="flex justify-between"><div><i class="fas fa-building text-indigo-500"></i><h3 class="font-bold">${c.name}</h3></div><button class="deleteCompanyBtn text-red-500" data-id="${c.id}"><i class="fas fa-trash"></i></button></div><p class="text-sm">${c.address || ''}</p></div>`).join('')}</div></div>
-          <div id="modalContainer"></div>
-        `;
-      }
-      function attachSuperEvents() {
-        document.getElementById("superLogout")?.addEventListener("click", logout);
-        document.getElementById("addCompanyBtn")?.addEventListener("click", () => {
-          const name = prompt("Company name"); if(name) addCompany(name, "", "");
-        });
-        document.querySelectorAll(".deleteCompanyBtn").forEach(btn => btn.addEventListener("click", (e) => deleteCompany(btn.dataset.id)));
-      }
-
-      let adminSelectedDate = new Date().toISOString().slice(0,10);
-      let adminTaskFilter = 'all';
-      function getFilteredEmployees() {
-        const tasksForDate = getTasksByDate(adminSelectedDate);
-        if (adminTaskFilter === 'all') return employees;
-        if (adminTaskFilter === 'submitted') return employees.filter(emp => tasksForDate.some(t => t.employeeId === emp.id));
-        if (adminTaskFilter === 'pending') return employees.filter(emp => !tasksForDate.some(t => t.employeeId === emp.id));
-        if (adminTaskFilter === 'inprogress') return employees.filter(emp => {
-          const task = tasksForDate.find(t => t.employeeId === emp.id);
-          return task && task.status === 'present';
-        });
-        return employees;
-      }
-
-      function renderAdminDashboard() {
-        const company = companies.find(c => c.id === currentCompanyId);
-        const tasksForDate = getTasksByDate(adminSelectedDate);
-        const totalEmployees = employees.length;
-        const tasksSubmitted = tasksForDate.length;
-        const pending = totalEmployees - tasksSubmitted;
-        const inProgress = tasksForDate.filter(t => t.status === 'present').length;
-        const filtered = getFilteredEmployees();
-        return `
-          <div class="glass-panel rounded-3xl shadow-xl p-6 md:p-8 fade-in">
-            <div class="flex flex-wrap justify-between items-center gap-4 mb-6"><div><h2 class="text-2xl font-bold">Admin · ${company?.name || "Company"}</h2><p class="text-gray-500">Welcome, ${currentUser.name}</p></div><div class="flex gap-2"><button id="exportBtn" class="bg-gray-800 text-white px-3 py-1.5 rounded-xl text-sm"><i class="fas fa-file-excel"></i> Export</button><button id="logoutAdmin" class="border px-3 py-1.5 rounded-xl">Logout</button></div></div>
-            <div class="mb-6 flex flex-wrap gap-3"><button id="addEmpBtn" class="bg-indigo-600 text-white px-4 py-2 rounded-xl"><i class="fas fa-user-plus"></i> Add Employee</button><div class="flex items-center gap-2 bg-white/50 p-2 rounded-xl"><i class="fas fa-calendar-alt"></i><input type="date" id="dateFilter" value="${adminSelectedDate}" class="border-0 bg-transparent"></div></div>
-            <div class="bg-white rounded-2xl shadow-sm overflow-hidden mb-8"><div class="px-6 py-3 border-b bg-gray-50"><h3 class="font-semibold">Team Members</h3></div><div class="overflow-x-auto"><table class="w-full text-sm"><thead class="bg-gray-50"><tr><th class="py-2 px-4 text-left">Name</th><th class="py-2 px-4 text-left">Email</th><th class="py-2 px-4">Role</th><th class="py-2 px-4 text-right">Action</th></tr></thead><tbody>${employees.map(emp => `<tr><td class="py-1 px-4">${emp.name}${emp.role==='admin'?' 👑':''}</td><td class="py-1 px-4">${emp.email}</td><td class="py-1 px-4"><span class="bg-gray-100 px-2 py-0.5 rounded-full text-xs">${emp.role}</span></td><td class="py-1 px-4 text-right"><button class="deleteEmp text-red-500" data-id="${emp.id}"><i class="fas fa-trash"></i></button></td></tr>`).join('')}</tbody></table></div></div>
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-              <div class="stats-card ${adminTaskFilter==='all'?'active':''}" data-filter="all"><div class="text-2xl font-bold text-indigo-600">${totalEmployees}</div><div class="text-xs">Total Employees</div></div>
-              <div class="stats-card ${adminTaskFilter==='submitted'?'active':''}" data-filter="submitted"><div class="text-2xl font-bold text-emerald-600">${tasksSubmitted}</div><div class="text-xs">Tasks Submitted</div></div>
-              <div class="stats-card ${adminTaskFilter==='pending'?'active':''}" data-filter="pending"><div class="text-2xl font-bold text-amber-600">${pending}</div><div class="text-xs">Pending</div></div>
-              <div class="stats-card ${adminTaskFilter==='inprogress'?'active':''}" data-filter="inprogress"><div class="text-2xl font-bold text-blue-600">${inProgress}</div><div class="text-xs">In Progress</div></div>
-            </div>
-            <div class="bg-white rounded-2xl shadow-sm overflow-hidden"><div class="px-6 py-3 border-b bg-gray-50"><h3 class="font-semibold">Tasks for ${adminSelectedDate}</h3></div><div class="overflow-x-auto"><table class="w-full text-sm"><thead class="bg-gray-50"><tr><th class="py-2 px-4 text-left">Employee</th><th class="py-2 px-4 text-left">Task</th><th class="py-2 px-4">Status</th><th class="py-2 px-4 text-center">Submitted</th></tr></thead><tbody>${filtered.map(emp => { const task = tasksForDate.find(t => t.employeeId === emp.id); const has = !!task; return `｜｜DSML｜｜<td class="py-1 px-4">${emp.name}</td><td class="py-1 px-4">${task ? task.taskText.substring(0,70) : '—'}</td><td class="py-1 px-4"><span class="px-2 py-0.5 rounded-full text-xs ${task ? (task.status==='leave'?'bg-rose-100 text-rose-700':'bg-emerald-100 text-emerald-700') : 'bg-gray-100'}">${task ? (task.status==='leave'?'Leave':'Present') : 'No task'}</span></td><td class="py-1 px-4 text-center"><input type="checkbox" ${has ? 'checked' : ''} disabled></td></tr>` }).join('')}</tbody></table></div></div>
-            <div class="text-xs text-center text-gray-400 mt-6">Click on stat cards to filter table 🔍</div>
-          </div>
-          <div id="modalContainer"></div>
-        `;
-      }
-
-      function attachAdminEvents() {
-        document.getElementById("exportBtn")?.addEventListener("click", exportToExcel);
-        document.getElementById("logoutAdmin")?.addEventListener("click", logout);
-        document.getElementById("addEmpBtn")?.addEventListener("click", showAddEmployeeModal);
-        document.querySelectorAll(".deleteEmp").forEach(btn => btn.addEventListener("click", (e) => deleteEmployee(btn.dataset.id)));
-        const datePicker = document.getElementById("dateFilter");
-        if(datePicker) datePicker.addEventListener("change", (e) => { adminSelectedDate = e.target.value; adminTaskFilter = 'all'; renderApp(); });
-        document.querySelectorAll(".stats-card").forEach(card => card.addEventListener("click", () => { adminTaskFilter = card.dataset.filter; renderApp(); }));
-      }
-
-      function showAddEmployeeModal() {
-        const modalHtml = `<div id="empModal" class="fixed inset-0 flex items-center justify-center z-50 bg-black/50 backdrop-blur-sm"><div class="bg-white rounded-2xl p-6 w-full max-w-md"><h3 class="text-xl font-bold mb-4">Add Employee</h3><form id="addEmpForm"><div class="mb-3"><input type="text" id="empName" placeholder="Full Name" class="w-full border rounded-xl px-3 py-2" required></div><div class="mb-3"><input type="email" id="empEmail" placeholder="Email" class="w-full border rounded-xl px-3 py-2" required></div><div class="mb-3"><input type="password" id="empPassword" placeholder="Password" class="w-full border rounded-xl px-3 py-2" required></div><div class="mb-4"><select id="empRole"><option value="employee">Employee</option><option value="admin">Admin</option></select></div><div class="flex justify-end gap-3"><button type="button" id="closeModalBtn" class="px-4 py-2 border rounded-xl">Cancel</button><button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded-xl">Create</button></div></form></div></div>`;
-        const container = document.getElementById("modalContainer");
-        container.innerHTML = modalHtml;
-        const close = () => container.innerHTML = '';
-        document.getElementById("closeModalBtn")?.addEventListener("click", close);
-        document.getElementById("addEmpForm")?.addEventListener("submit", async (e) => {
-          e.preventDefault();
-          const name = document.getElementById("empName").value, email = document.getElementById("empEmail").value, pwd = document.getElementById("empPassword").value, role = document.getElementById("empRole").value;
-          await addEmployee(name, email, pwd, role);
-          close();
-        });
-        document.getElementById("empModal")?.addEventListener("click", (e) => { if(e.target === document.getElementById("empModal")) close(); });
-      }
-
-      function renderEmployeeDashboard() {
-        const today = new Date().toISOString().slice(0,10);
-        const myTasks = getEmployeeTasks(currentUser.uid);
-        const todayTask = tasks.find(t => t.employeeId === currentUser.uid && t.date === today);
-        const taskValue = todayTask ? todayTask.taskText : "";
-        const isLeave = todayTask ? todayTask.status === "leave" : false;
-        const hasSubmitted = !!todayTask;
-        const totalTasks = myTasks.length;
-        const leaveDays = myTasks.filter(t => t.status === "leave").length;
-        const presentDays = totalTasks - leaveDays;
-        return `
-          <div class="glass-panel rounded-3xl shadow-xl p-6 md:p-8 max-w-4xl mx-auto fade-in">
-            <div class="flex justify-between items-center mb-6"><div><h2 class="text-2xl font-bold">Welcome, ${currentUser.name}</h2><p class="text-gray-500">${companies.find(c=>c.id===currentCompanyId)?.name}</p></div><button id="employeeLogoutBtn" class="border px-4 py-2 rounded-xl">Logout</button></div>
-            <div class="bg-gradient-to-br from-indigo-50 to-sky-50 rounded-2xl p-5 mb-8"><div class="flex justify-between items-center mb-2"><h3 class="font-semibold text-lg">Today's Task · ${today}</h3><div class="flex items-center gap-2"><i class="fas fa-check-circle text-green-600"></i><span class="text-sm">Task submitted: ${hasSubmitted ? '✅ Yes' : '❌ No'}</span></div></div><form id="employeeTaskForm"><textarea id="taskDesc" rows="3" class="w-full border rounded-xl p-3" placeholder="Describe your work...">${taskValue.replace(/</g, '&lt;')}</textarea><div class="flex items-center gap-4 my-4"><label class="flex items-center gap-2"><input type="checkbox" id="leaveCheckbox" ${isLeave ? 'checked' : ''}> <i class="fas fa-umbrella-beach"></i> On Leave / Absent today</label></div><button type="submit" class="bg-indigo-600 text-white px-5 py-2 rounded-xl"><i class="fas fa-save"></i> Save Task</button></form></div>
-            <h3 class="font-bold text-xl mb-3">My History</h3><div class="overflow-x-auto rounded-xl border bg-white/50 mb-6"><table class="min-w-full text-sm"><thead><tr><th class="px-4 py-2 text-left">Date</th><th class="px-4 py-2 text-left">Task</th><th class="px-4 py-2 text-left">Status</th></tr></thead><tbody>${myTasks.map(tsk => `<tr><td class="px-4 py-2">${tsk.date}</td><td class="px-4 py-2">${tsk.taskText.substring(0,100)}</td><td class="px-4 py-2"><span class="px-2 py-0.5 rounded-full text-xs ${tsk.status==='leave'?'bg-rose-100':'bg-emerald-100'}">${tsk.status==='leave'?'Leave':'Present'}</span></td></tr>`).join('')}${!myTasks.length ? '<tr><td colspan="3" class="text-center py-4">No tasks yet</td>' : ''}</tbody>}</table></div>
-            <div class="grid md:grid-cols-3 gap-4"><div class="stats-card"><div class="text-2xl font-bold text-indigo-600">${totalTasks}</div><div class="text-xs">Total Tasks</div></div><div class="stats-card"><div class="text-2xl font-bold text-emerald-600">${presentDays}</div><div class="text-xs">Present Days</div></div><div class="stats-card"><div class="text-2xl font-bold text-rose-500">${leaveDays}</div><div class="text-xs">Leave Days</div></div></div>
-          </div>
-        `;
-      }
-      function attachEmployeeEvents() {
-        const form = document.getElementById("employeeTaskForm");
-        if (!form) return;
-        document.getElementById("employeeLogoutBtn")?.addEventListener("click", logout);
-        const leaveCheck = document.getElementById("leaveCheckbox");
-        const taskArea = document.getElementById("taskDesc");
-        const toggle = () => { if (leaveCheck.checked) { taskArea.value = "On Leave / Absent — No tasks"; taskArea.disabled = true; } else { if (taskArea.disabled) taskArea.value = ""; taskArea.disabled = false; } };
-        leaveCheck?.addEventListener("change", toggle);
-        toggle();
-        form.addEventListener("submit", async (e) => {
-          e.preventDefault();
-          let text = taskArea.value.trim();
-          const date = new Date().toISOString().slice(0,10);
-          let status = "present";
-          if (leaveCheck.checked) { status = "leave"; if (!text) text = "Official leave"; }
-          else if (!text) { alert("Please describe your task or mark leave."); return; }
-          await saveOrUpdateTask(currentUser.uid, date, text, status);
-          alert("✅ Task saved!");
-        });
-      }
-
-      // ======================= RENDER APP =======================
-      function renderApp() {
-        const root = document.getElementById("appRoot");
-        if (!root) return;
-        if (!currentUser) {
-          if (!companies.length) {
-            root.innerHTML = `<div class="text-center mt-20">No companies yet. Owner can add one.</div>`;
-            return;
-          }
-          root.innerHTML = renderLoginScreen();
-          attachLoginEvents();
-          return;
-        }
-        if (currentUser.role === "super") {
-          root.innerHTML = renderSuperDashboard();
-          attachSuperEvents();
-        } else if (currentUser.role === "admin") {
-          root.innerHTML = renderAdminDashboard();
-          attachAdminEvents();
-        } else if (currentUser.role === "employee") {
-          root.innerHTML = renderEmployeeDashboard();
-          attachEmployeeEvents();
-        }
-      }
-
-      // Start the app
+  async function addCompany(name) {
+    if (!name) return alert("Company name required");
+    await db.collection("companies").add({ name, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    await loadCompanies();
+    renderApp();
+  }
+  async function deleteCompany(cid) {
+    if (confirm("Delete company & all data?")) {
+      const users = await db.collection("users").where("companyId", "==", cid).get();
+      const tasksSnap = await db.collection("tasks").where("companyId", "==", cid).get();
+      const batch = db.batch();
+      users.docs.forEach(d => batch.delete(d.ref));
+      tasksSnap.docs.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      await db.collection("companies").doc(cid).delete();
       await loadCompanies();
+      if (currentCompanyId === cid) currentCompanyId = null;
       renderApp();
-    } catch (err) {
-      console.error("Firebase initialization error:", err);
-      document.getElementById("appRoot").innerHTML = `<div class="error-box"><i class="fas fa-exclamation-triangle"></i> Error: ${err.message}<br><br>Please check:<br>1. Firebase console mein Authentication (Email/Password) enable hai?<br>2. Firestore database "test mode" mein hai?<br>3. Console mein error dekhein (F12).</div>`;
     }
-  })();
+  }
+
+  async function addEmployee(name, email, pwd, role) {
+    if (!name || !email || !pwd) return alert("All fields required");
+    try {
+      const cred = await auth.createUserWithEmailAndPassword(email, pwd);
+      await db.collection("users").doc(cred.user.uid).set({
+        name, email, role, companyId: currentCompanyId, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      await loadCompanyData(currentCompanyId);
+      renderApp();
+    } catch (err) { alert(err.message); }
+  }
+  async function deleteEmployee(empId) {
+    if (currentUser.uid === empId) { alert("Cannot delete self"); return; }
+    await db.collection("users").doc(empId).delete();
+    const tasksSnap = await db.collection("tasks").where("employeeId", "==", empId).get();
+    const batch = db.batch();
+    tasksSnap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+    await loadCompanyData(currentCompanyId);
+    renderApp();
+  }
+
+  async function saveOrUpdateTask(empId, date, text, status) {
+    const existing = tasks.find(t => t.employeeId === empId && t.date === date);
+    if (existing) await db.collection("tasks").doc(existing.id).update({ taskText: text, status });
+    else await db.collection("tasks").add({ employeeId: empId, companyId: currentCompanyId, date, taskText: text, status, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    await loadCompanyData(currentCompanyId);
+    renderApp();
+  }
+  function getEmployeeTasks(empId) { return tasks.filter(t => t.employeeId === empId).sort((a,b) => b.date.localeCompare(a.date)); }
+  function getTasksByDate(date) {
+    return tasks.filter(t => t.date === date).map(t => {
+      const emp = employees.find(e => e.id === t.employeeId);
+      return { ...t, employeeName: emp ? emp.name : "Deleted" };
+    });
+  }
+  function exportToExcel() {
+    const empData = employees.map(e => ({ ID: e.id, Name: e.name, Email: e.email, Role: e.role }));
+    const taskData = tasks.map(t => {
+      const emp = employees.find(e => e.id === t.employeeId);
+      return { Employee: emp ? emp.name : "Deleted", Date: t.date, Task: t.taskText, Status: t.status === "leave" ? "Leave" : "Present" };
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(empData), "Employees");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(taskData), "Tasks");
+    XLSX.writeFile(wb, `TaskFlow_${new Date().toISOString().slice(0,10)}.xlsx`);
+  }
+
+  // UI rendering functions (simplified but complete)
+  function renderLoginScreen() {
+    const opts = companies.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    return `<div class="bg-white p-6 rounded-2xl shadow-xl max-w-2xl mx-auto mt-10"><h1 class="text-2xl font-bold text-center">TaskFlow</h1>
+      <div class="grid md:grid-cols-2 gap-4 mt-4">
+        <div><h3 class="font-bold">Admin Login</h3><form id="adminForm"><select id="adminCid" class="w-full border p-2 rounded">${opts}</select><input id="adminEmail" placeholder="Email" class="w-full border p-2 mt-2"><input id="adminPwd" type="password" placeholder="Password" class="w-full border p-2 mt-2"><button class="bg-blue-600 text-white w-full mt-2 py-1 rounded">Login</button></form></div>
+        <div><h3 class="font-bold">Employee Login</h3><form id="empForm"><select id="empCid" class="w-full border p-2 rounded">${opts}</select><input id="empEmail" placeholder="Email" class="w-full border p-2 mt-2"><input id="empPwd" type="password" placeholder="Password" class="w-full border p-2 mt-2"><button class="bg-green-600 text-white w-full mt-2 py-1 rounded">Login</button></form></div>
+      </div>
+      <div class="text-center mt-4"><button id="ownerBtn" class="underline">Owner Login</button></div></div>`;
+  }
+  function attachLoginEvents() {
+    document.getElementById("adminForm")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      await loginToCompany(document.getElementById("adminCid").value, document.getElementById("adminEmail").value, document.getElementById("adminPwd").value);
+    });
+    document.getElementById("empForm")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      await loginToCompany(document.getElementById("empCid").value, document.getElementById("empEmail").value, document.getElementById("empPwd").value);
+    });
+    document.getElementById("ownerBtn")?.addEventListener("click", () => {
+      const e = prompt("Owner email:"), p = prompt("Password:");
+      if (e === SUPER_EMAIL && p === SUPER_PASSWORD) loginSuper(e, p);
+      else alert("Invalid");
+    });
+  }
+
+  function renderSuper() {
+    return `<div class="bg-white p-6 rounded-2xl"><div class="flex justify-between"><h2 class="text-xl font-bold">Owner Dashboard</h2><button id="logoutSuper" class="border px-2 py-1 rounded">Logout</button></div><button id="addCompanyBtn" class="bg-blue-600 text-white px-3 py-1 rounded my-2">+ Add Company</button><div>${companies.map(c => `<div class="flex justify-between border-b py-1"><span>${c.name}</span><button class="delComp text-red-500" data-id="${c.id}">Delete</button></div>`).join('')}</div></div>`;
+  }
+  function attachSuperEvents() {
+    document.getElementById("logoutSuper")?.addEventListener("click", logout);
+    document.getElementById("addCompanyBtn")?.addEventListener("click", () => { const n = prompt("Company name"); if(n) addCompany(n); });
+    document.querySelectorAll(".delComp").forEach(btn => btn.addEventListener("click", (e) => deleteCompany(btn.dataset.id)));
+  }
+
+  let adminDate = new Date().toISOString().slice(0,10), filter = 'all';
+  function renderAdmin() {
+    const dayTasks = getTasksByDate(adminDate);
+    const filteredEmps = employees.filter(e => filter==='all'?true:(filter==='submitted'?dayTasks.some(t=>t.employeeId===e.id):!dayTasks.some(t=>t.employeeId===e.id)));
+    return `<div class="bg-white p-6 rounded-2xl"><div class="flex justify-between"><h2 class="text-xl font-bold">Admin · ${companies.find(c=>c.id===currentCompanyId)?.name}</h2><div><button id="exportAdmin" class="bg-gray-700 text-white px-2 py-1 rounded">Excel</button><button id="logoutAdmin" class="border px-2 py-1 rounded ml-2">Logout</button></div></div>
+      <div class="flex gap-2 my-3"><button id="addEmpBtn" class="bg-indigo-600 text-white px-3 py-1 rounded">+ Employee</button><input type="date" id="datePick" value="${adminDate}" class="border p-1 rounded"></div>
+      <div class="flex gap-2 my-2"><span class="cursor-pointer border px-2 py-1 ${filter==='all'?'bg-blue-100':''}" data-filter="all">All (${employees.length})</span><span class="cursor-pointer border px-2 py-1 ${filter==='submitted'?'bg-green-100':''}" data-filter="submitted">Submitted (${dayTasks.length})</span><span class="cursor-pointer border px-2 py-1 ${filter==='pending'?'bg-yellow-100':''}" data-filter="pending">Pending (${employees.length-dayTasks.length})</span></div>
+      <div class="overflow-auto"><table class="min-w-full border"><thead class="bg-gray-200"><tr><th class="p-2">Employee</th><th class="p-2">Task</th><th class="p-2">Status</th><th class="p-2">✓</th></tr></thead><tbody>${filteredEmps.map(e=>{const t=dayTasks.find(d=>d.employeeId===e.id); return `<tr><td class="p-2 border">${e.name}</td><td class="p-2 border">${t?t.taskText:'—'}</td><td class="p-2 border">${t?(t.status==='leave'?'Leave':'Present'):'No task'}</td><td class="p-2 border text-center"><input type="checkbox" ${t?'checked':''} disabled></td><tr>`;}).join('')}</tbody></table></div></div>`;
+  }
+  function attachAdminEvents() {
+    document.getElementById("exportAdmin")?.addEventListener("click", exportToExcel);
+    document.getElementById("logoutAdmin")?.addEventListener("click", logout);
+    document.getElementById("addEmpBtn")?.addEventListener("click", () => {
+      const name = prompt("Name"), email = prompt("Email"), pwd = prompt("Password"), role = confirm("Admin? (Ok=Admin, Cancel=Employee)") ? "admin" : "employee";
+      if(name && email && pwd) addEmployee(name, email, pwd, role);
+    });
+    document.getElementById("datePick")?.addEventListener("change", (e) => { adminDate = e.target.value; filter='all'; renderApp(); });
+    document.querySelectorAll("[data-filter]").forEach(el => el.addEventListener("click", (e) => { filter = e.target.dataset.filter; renderApp(); }));
+  }
+
+  function renderEmployee() {
+    const today = new Date().toISOString().slice(0,10);
+    const myTasks = getEmployeeTasks(currentUser.uid);
+    const todayTask = tasks.find(t => t.employeeId === currentUser.uid && t.date === today);
+    return `<div class="bg-white p-6 rounded-2xl max-w-2xl mx-auto"><div class="flex justify-between"><h2 class="text-xl font-bold">Hi, ${currentUser.name}</h2><button id="empLogout" class="border px-2 py-1 rounded">Logout</button></div>
+      <div class="bg-blue-50 p-4 rounded my-4"><h3>Today: ${today}</h3><form id="taskForm"><textarea id="taskDesc" class="w-full border p-2 rounded">${todayTask?todayTask.taskText:''}</textarea><label><input type="checkbox" id="leaveChk" ${todayTask?.status==='leave'?'checked':''}> On Leave</label><button class="bg-blue-600 text-white px-3 py-1 rounded mt-2">Save</button></form><div>Submitted: ${todayTask?'✅ Yes':'❌ No'}</div></div>
+      <h3 class="font-bold">History</h3><table class="w-full border"><thead class="bg-gray-200"><tr><th>Date</th><th>Task</th><th>Status</th></tr></thead><tbody>${myTasks.map(t=>`<tr><td class="border p-1">${t.date}</td><td class="border p-1">${t.taskText.substring(0,50)}</td><td class="border p-1">${t.status==='leave'?'Leave':'Present'}</td></tr>`).join('')}</tbody></table></div>`;
+  }
+  function attachEmployeeEvents() {
+    document.getElementById("empLogout")?.addEventListener("click", logout);
+    document.getElementById("taskForm")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const text = document.getElementById("taskDesc").value.trim();
+      const date = new Date().toISOString().slice(0,10);
+      const status = document.getElementById("leaveChk").checked ? "leave" : "present";
+      if(!text && status==="present") return alert("Please enter task or mark leave");
+      await saveOrUpdateTask(currentUser.uid, date, text||"Leave day", status);
+    });
+  }
+
+  async function startApp() {
+    await loadCompanies();
+    renderApp();
+  }
+
+  function renderApp() {
+    const root = document.getElementById("app");
+    if(!root) return;
+    if(!currentUser) { root.innerHTML = renderLoginScreen(); attachLoginEvents(); return; }
+    if(currentUser.role === "super") { root.innerHTML = renderSuper(); attachSuperEvents(); return; }
+    if(currentUser.role === "admin") { root.innerHTML = renderAdmin(); attachAdminEvents(); return; }
+    if(currentUser.role === "employee") { root.innerHTML = renderEmployee(); attachEmployeeEvents(); return; }
+  }
 </script>
 </body>
 </html>
